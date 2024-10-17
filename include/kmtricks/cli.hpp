@@ -23,6 +23,7 @@
 #include <string>
 
 // ext
+#include <algorithm>
 #include <bcli/bcli.hpp>
 
 // int
