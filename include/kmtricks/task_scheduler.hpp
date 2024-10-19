@@ -396,6 +396,101 @@ public:
     return count;
   }
 
+  // partition k-mers from Logan unitigs
+  // assign to each k-mer the abundance of the unitigs it belongs to
+  void exec_logan_count() 
+  {
+    // spdlog::info("Repartition Storage: {}", KmDir::get().m_repart_storage);
+
+    TaskPool pool(m_opt->nb_threads);
+    
+    auto nb_partitions = m_config._nb_partitions;
+    Repartition repart(km::KmDir::get().m_repart_storage + "_gatb/repartition.minimRepart");
+
+    for (auto sample : KmDir::get().m_fof) 
+    {
+      auto& sid = std::get<0>(sample);
+      auto iid = KmDir::get().m_fof.get_i(sid);
+      auto utg_file = KmDir::get().m_fof.get_files(sid);
+      
+      task_t task = std::make_shared<LoganRepartTask<MAX_K>>(sid, iid, utg_file, m_opt->lz4, m_opt->restrict_to_list);
+      pool.add_task(task);
+
+      // auto a_min = std::get<2>(sample) == 0 ? m_opt->c_ab_min : std::get<2>(sample);
+      // fmt::print(stderr, "[info] processing unitig sample {}: {}\n", sid, utg_file);
+    }
+
+    pool.join_all();
+
+    // for (auto id : KmDir::get().m_fof)
+    // {
+    //   uint32_t a_min = std::get<2>(id) == 0 ? m_opt->c_ab_min : std::get<2>(id);
+    //   uint32_t iid = KmDir::get().m_fof.get_i(std::get<0>(id));
+    //   std::string sid = std::get<0>(id);
+    //   sk_storage_t sk_storage = std::make_shared<SuperKStorageReader>(KmDir::get().get_superk_path(sid));
+    //   parti_info_t pinfos = std::make_shared<PartiInfo<5>>(KmDir::get().get_superk_path(sid));
+    //   for (auto& p : m_opt->restrict_to_list)
+    //   {
+    //     std::string path;
+    //     task_t task = nullptr;
+    //     if (m_opt->count_format == COUNT_FORMAT::KMER)
+    //     {
+    //       if (!m_opt->kff)
+    //       {
+    //         spdlog::debug("[push] - CountTask - S={}, P={}", sid, p);
+    //         path = KmDir::get().get_count_part_path(
+    //           sid, p, m_opt->lz4, KM_FILE::KMER);
+    //         task = std::make_shared<CountTask<MAX_K, MAX_C, SuperKStorageReader>>(
+    //           path, m_config, sk_storage, pinfos, p, iid, m_config._kmerSize,
+    //           a_min, m_opt->lz4, get_hist_clone(m_hists[iid]), !m_opt->keep_tmp);
+    //       }
+    //       else if (m_opt->kff)
+    //       {
+    //         spdlog::debug("[push] - KffCountTask - S={}, P={}", sid, p);
+    //         path = KmDir::get().get_count_part_path(
+    //           sid, p, m_opt->lz4, KM_FILE::KFF);
+    //         task = std::make_shared<KffCountTask<MAX_K, MAX_C, SuperKStorageReader>>(
+    //           path, m_config, sk_storage, pinfos, p, iid,
+    //           m_config._kmerSize, a_min, get_hist_clone(m_hists[iid]), !m_opt->keep_tmp);
+    //       }
+    //     }
+    //     else
+    //     {
+    //       if (!m_opt->skip_merge)
+    //       {
+    //         spdlog::debug("[push] - HashCountTask - S={}, P={}", sid, p);
+    //         path = KmDir::get().get_count_part_path(
+    //           sid, p, m_opt->lz4, KM_FILE::HASH);
+    //         task = std::make_shared<HashCountTask<MAX_K, MAX_C, SuperKStorageReader>>(
+    //           path, m_config, sk_storage, pinfos, p, iid,
+    //           m_hw.get_window_size_bits(), m_config._kmerSize, a_min, m_opt->lz4,
+    //           get_hist_clone(m_hists[iid]), !m_opt->keep_tmp);
+    //       }
+    //       else
+    //       {
+    //         spdlog::debug("[push] - HashVecCountTask - S={}, P={}", sid, p);
+    //         path = KmDir::get().get_count_part_path(
+    //           sid, p, m_opt->lz4, KM_FILE::VECTOR);
+    //         task = std::make_shared<HashVecCountTask<MAX_K, MAX_C, SuperKStorageReader>>(
+    //           path, m_config, sk_storage, pinfos, p, iid,
+    //           m_hw.get_window_size_bits(), m_config._kmerSize, a_min, m_opt->lz4,
+    //           get_hist_clone(m_hists[iid]), !m_opt->keep_tmp);
+    //       }
+    //     }
+    //     if (m_is_info) task->set_callback([this](){ this->m_dyn[1].tick(); });
+
+    //     pool.add_task(task);
+    //   }
+    // }
+
+  }
+
+  // sort k-mer-with-count partitions, before the merge step
+  void exec_logan_sort() 
+  {
+
+  }
+
   void exec_merge()
   {
     if (m_is_info)
@@ -504,6 +599,10 @@ public:
 
     exec_config();
     exec_repart();
+
+    if (m_opt->logan) {
+      exec_logan_count();
+    }
 
     if (m_opt->until == COMMAND::REPART)
       goto end;

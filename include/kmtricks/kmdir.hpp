@@ -201,6 +201,7 @@ public:
     m_config_storage = fmt::format("{}/config", m_root);
     m_repart_storage = fmt::format("{}/repartition", m_root);
     m_superk_storage = fmt::format("{}/superkmers", m_root);
+    m_unsorted_counts_storage = fmt::format("{}/unsorted_counts", m_root);
     m_counts_storage = fmt::format("{}/counts", m_root);
     m_matrix_storage = fmt::format("{}/matrices", m_root);
     m_filter_storage = fmt::format("{}/filters", m_root);
@@ -221,6 +222,7 @@ public:
       fs::create_directory(m_root);
       m_fof.copy(m_fof_path);
       fs::create_directory(m_superk_storage);
+      fs::create_directory(m_unsorted_counts_storage);
       fs::create_directory(m_counts_storage);
       fs::create_directory(m_matrix_storage);
       fs::create_directory(m_filter_storage);
@@ -246,12 +248,14 @@ public:
   {
     for (uint32_t i=0; i<nb_parts; i++)
     {
+      fs::create_directory(fmt::format("{}/partition_{}", m_unsorted_counts_storage, i));
       fs::create_directory(fmt::format("{}/partition_{}", m_counts_storage, i));
     }
   }
 
   void init_one_part(uint32_t part)
   {
+    fs::create_directory(fmt::format("{}/partition_{}", m_unsorted_counts_storage, part));
     fs::create_directory(fmt::format("{}/partition_{}", m_counts_storage, part));
   }
 
@@ -264,6 +268,7 @@ public:
   std::string m_config_storage;
   std::string m_repart_storage;
   std::string m_superk_storage;
+  std::string m_unsorted_counts_storage;
   std::string m_counts_storage;
   std::string m_matrix_storage;
   std::string m_filter_storage;

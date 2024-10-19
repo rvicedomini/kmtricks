@@ -55,6 +55,7 @@ struct all_options : km_options
   bool kff {false};
   bool skip_merge {false};
   bool hist {false};
+  bool logan {false};
 
   uint32_t bwidth {0};
 
@@ -102,6 +103,7 @@ struct all_options : km_options
     RECORD(ss, kff);
     RECORD(ss, skip_merge);
     RECORD(ss, hist);
+    RECORD(ss, logan);
     RECORD(ss, focus);
     RECORD(ss, restrict_to);
     RECORD(ss, bwidth);

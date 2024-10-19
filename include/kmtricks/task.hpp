@@ -21,6 +21,7 @@
 #include <cmath>
 #include <functional>
 #include <filesystem>
+#include <regex>
 
 #include <gatb/gatb_core.hpp>
 #include <gatb/kmer/impl/RepartitionAlgorithm.hpp>
@@ -38,6 +39,8 @@
 #include <kmtricks/gatb/gatb_utils.hpp>
 #include <kmtricks/itask.hpp>
 #include <kmtricks/repartition.hpp>
+
+#include <seqio.hpp> // kseq++
 
 #ifdef WITH_PLUGIN
 #include <kmtricks/plugin_manager.hpp>
@@ -265,6 +268,157 @@ private:
   bool m_lz4;
   std::vector<uint32_t>& m_partitions;
 };
+
+
+template<size_t span>
+class LoganRepartTask : public ITask
+{
+  inline static std::regex abundance_pattern{ R"(\bk[ma]:f:(\S+)\b)" };
+
+public:
+  LoganRepartTask(const std::string& sample_id, uint32_t iid, const std::string& utg_file, bool lz4, std::vector<uint32_t>& partitions)
+    : ITask(2), m_sample_id(sample_id), m_iid(iid), m_utg_file(utg_file), m_lz4(lz4), m_partitions(partitions) {}
+
+  void preprocess() {}
+
+  void postprocess()
+  {
+    this->exec_callback();
+    this->m_finish = true;
+    this->m_running = false;
+  }
+
+  void exec()
+  {
+    spdlog::debug("[exec] - LoganRepartTask - S={}", m_sample_id);
+    this->m_running = true;
+
+    IBank* bank = Bank::open(KmDir::get().m_fof.get_files(m_sample_id)); LOCAL(bank);
+    Storage* config_storage = StorageFactory(STORAGE_FILE).load(KmDir::get().m_config_storage);
+    Storage* repart_storage = StorageFactory(STORAGE_FILE).load(KmDir::get().m_repart_storage);
+    LOCAL(config_storage); LOCAL(repart_storage);
+
+    Configuration config = Configuration();
+    config.load(config_storage->getGroup("gatb"));
+    Repartitor repartitor(repart_storage->getGroup("repartition"));
+
+    // typedef typename ::Kmer<span>::ModelCanonical ModelCanonical;
+    // typedef typename ::Kmer<span>::template ModelMinimizer <ModelCanonical> Model;
+
+    // uint32_t* freq_order = nullptr;
+    // Model model(config._kmerSize, config._minim_size,
+    //             typename ::Kmer<span>::ComparatorMinimizerFrequencyOrLex(), freq_order);
+
+    Iterator<Sequence>* itSeq = bank->iterator(); LOCAL(itSeq);
+    BankStats bank_stats;
+    PartiInfo<5> pinfo (config._nb_partitions, config._minim_size);
+
+    for (itSeq->first(); !itSeq->isDone(); itSeq->next()) {
+      auto& unitig = itSeq->item();
+
+      std::smatch match;
+      bool found = std::regex_search(unitig.getComment(), match, abundance_pattern);
+      if (!found) {
+        spdlog::warn("skipping unitig \"{}\" due to missing abundance information\n", unitig.getCommentShort());
+        continue;
+      }
+
+      auto abundance = std::round(std::stod(match[1].str()));
+      auto &seq = unitig.getData();
+    }
+
+    // spdlog::debug("[exec] - KffCountTask - S={}, P={}", KmDir::get().m_fof.get_id(m_sample_id), m_part_id);
+
+    // MemAllocator pool(1);
+    // pool.reserve(get_required_memory<span>(m_pinfo->getNbKmer(m_part_id)));
+    // kff_w_t<DMAX_C> writer = std::make_shared<KffWriter<MAX_C>>(m_path, m_kmer_size);
+
+    // KffCountProcessor<span, DMAX_C>* processor(new KffCountProcessor<span, MAX_C>(m_kmer_size,
+    //                                                                               m_ab_min,
+    //                                                                               writer,
+    //                                                                               m_hist));
+
+    // KmerPartCounter<Storage, span> partition_counter(processor, m_pinfo.get(), m_part_id, m_kmer_size,
+    //                                                  pool, m_superk_storage.get());
+
+    // partition_counter.execute();
+    // pool.free_all();
+    // delete processor;
+
+    // spdlog::debug("[done] - KffCountTask - S={}, P={}", KmDir::get().m_fof.get_id(m_sample_id), m_part_id);
+
+
+
+    // size_t p = m_repartition(superKmer.minimizer);
+    // superKmer.save(p, m_superk_files);
+
+    // klibpp::KSeq unitig;
+    // klibpp::SeqStreamIn utg_ssi(utg_file.c_str());
+
+    // std::vector<kw_t<8192>> out_streams;
+    // for(auto pid=0; pid < nb_partitions; pid++) {
+    //   std::string path = fmt::format("{}/partition_{:d}/{}.kmer", opts.ucounts_dir.string(), pid, sid);
+    //   out_streams.push_back(std::make_shared<km::KmerWriter<8192>>(path, ksize, km::requiredC<DMAX_C>::value/8, iid, pid, true));
+    // }
+
+    // for(uint64_t utg_id=0; utg_ssi >> unitig; utg_id++) {
+
+    //   auto utg_abundance = std::round(std::stod(match[1].str()));
+    //   auto &seq = unitig.seq;
+    //   km::Kmer<MAX_K> kmer(ksize);
+    //   for(std::size_t i=0; i < seq.length()-ksize+1; i++) {
+    //     if(i==0) {
+    //       kmer.set_polynom(seq.c_str(),ksize);
+    //     } else {
+    //       kmer <<= 2;
+    //       kmer |= ((seq[i+ksize-1] >> 1) & 3);
+    //     }
+    //     uint32_t pid = repart.get_partition(kmer.minimizer(opts.minim_size).value());
+    //     out_streams[pid]->template write<MAX_K, DMAX_C>(kmer,utg_abundance);
+    //   }
+    // }
+
+    // IteratorListener* progress(new ProgressSynchro(
+    //                            new IteratorListener(),
+    //                            System::thread().newSynchronizer()));
+    // LOCAL(progress);
+    // progress->init();
+    // {
+    //   auto fill_partitions = KmFillPartitions<span>(model,
+    //                                                     1,
+    //                                                     0,
+    //                                                     config._nb_partitions,
+    //                                                     config._nb_cached_items_per_core_per_part,
+    //                                                     progress,
+    //                                                     bank_stats,
+    //                                                     nullptr,
+    //                                                     repartitor,
+    //                                                     pinfo,
+    //                                                     superk_storage);
+
+    //   for (itSeq->first(); !itSeq->isDone(); itSeq->next())
+    //   {
+    //     fill_partitions(itSeq->item());
+    //   }
+    //   itSeq->finalize();
+    // }
+
+    // progress->finish();
+    // superk_storage->SaveInfoFile(KmDir::get().get_superk_path(m_sample_id));
+    // delete superk_storage;
+    // pinfo.saveInfoFile(KmDir::get().get_superk_path(m_sample_id));
+    // dump_pinfo(&pinfo, config._nb_partitions, KmDir::get().get_pinfos_path(m_sample_id));
+    // spdlog::debug("[done] - SuperKTask - S={}", m_sample_id);
+  }
+
+private:
+  std::string m_sample_id;
+  uint32_t m_iid;
+  std::string m_utg_file;
+  bool m_lz4;
+  std::vector<uint32_t>& m_partitions;
+};
+
 
 template<size_t span, size_t MAX_C, typename Storage>
 class CountTask : public ITask
