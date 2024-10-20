@@ -98,6 +98,29 @@ public:
     return fmt::format(m_part_template, m_counts_storage, part_id, id, ext);
   }
 
+  std::string get_unsorted_count_part_path(std::string id, uint32_t part_id, bool compressed, KM_FILE km_file)
+  {
+    std::string ext;
+    if (KM_FILE::HASH == km_file)
+      ext = "hash";
+    else if (KM_FILE::KMER == km_file)
+      ext = "kmer";
+    else if (KM_FILE::VECTOR == km_file)
+      ext = "vector";
+    else if (KM_FILE::KFF == km_file)
+      ext = "kff";
+
+    if (compressed)
+    {
+      if (KM_FILE::KMER == km_file || KM_FILE::VECTOR == km_file)
+        ext += ".lz4";
+      else if (KM_FILE::HASH == km_file)
+        ext += ".p4";
+    }
+
+    return fmt::format(m_part_template, m_unsorted_counts_storage, part_id, id, ext);
+  }
+
   std::vector<std::string> get_count_part_paths(std::string id, uint32_t nb_parts,
                                                 bool compressed, KM_FILE km_file)
   {
@@ -201,7 +224,7 @@ public:
     m_config_storage = fmt::format("{}/config", m_root);
     m_repart_storage = fmt::format("{}/repartition", m_root);
     m_superk_storage = fmt::format("{}/superkmers", m_root);
-    m_unsorted_counts_storage = fmt::format("{}/unsorted_counts", m_root);
+    m_unsorted_counts_storage = fmt::format("{}/counts_unsorted", m_root);
     m_counts_storage = fmt::format("{}/counts", m_root);
     m_matrix_storage = fmt::format("{}/matrices", m_root);
     m_filter_storage = fmt::format("{}/filters", m_root);

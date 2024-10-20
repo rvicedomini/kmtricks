@@ -27,6 +27,7 @@
 #include <gatb/kmer/impl/RepartitionAlgorithm.hpp>
 #include <gatb/kmer/impl/ConfigurationAlgorithm.hpp>
 #include <gatb/kmer/impl/SortingCountAlgorithm.cpp>
+#include <gatb/kmer/impl/Model.hpp>
 
 #include <kmtricks/io/fof.hpp>
 #include <kmtricks/kmdir.hpp>
@@ -39,8 +40,6 @@
 #include <kmtricks/gatb/gatb_utils.hpp>
 #include <kmtricks/itask.hpp>
 #include <kmtricks/repartition.hpp>
-
-#include <seqio.hpp> // kseq++
 
 #ifdef WITH_PLUGIN
 #include <kmtricks/plugin_manager.hpp>
@@ -223,8 +222,7 @@ public:
     typedef typename ::Kmer<span>::template ModelMinimizer <ModelCanonical> Model;
 
     uint32_t* freq_order = nullptr;
-    Model model(config._kmerSize, config._minim_size,
-                typename ::Kmer<span>::ComparatorMinimizerFrequencyOrLex(), freq_order);
+    Model model(config._kmerSize, config._minim_size, typename ::Kmer<span>::ComparatorMinimizerFrequencyOrLex(), freq_order);
 
     Iterator<Sequence>* itSeq = bank->iterator(); LOCAL(itSeq);
     BankStats bank_stats;
@@ -270,14 +268,16 @@ private:
 };
 
 
-template<size_t span>
+template<size_t span, size_t MAX_C>
 class LoganRepartTask : public ITask
 {
+  using km_count_type = typename selectC<MAX_C>::type;
+
   inline static std::regex abundance_pattern{ R"(\bk[ma]:f:(\S+)\b)" };
 
 public:
-  LoganRepartTask(const std::string& sample_id, uint32_t iid, const std::string& utg_file, bool lz4, std::vector<uint32_t>& partitions)
-    : ITask(2), m_sample_id(sample_id), m_iid(iid), m_utg_file(utg_file), m_lz4(lz4), m_partitions(partitions) {}
+  LoganRepartTask(const std::string& sample_id, uint32_t iid, const std::string& utg_file, uint32_t abundance_min, bool lz4, std::vector<uint32_t>& partitions)
+    : ITask(2), m_sample_id(sample_id), m_iid(iid), m_utg_file(utg_file), m_ab_min(abundance_min), m_lz4(lz4), m_partitions(partitions) {}
 
   void preprocess() {}
 
@@ -298,22 +298,28 @@ public:
     Storage* repart_storage = StorageFactory(STORAGE_FILE).load(KmDir::get().m_repart_storage);
     LOCAL(config_storage); LOCAL(repart_storage);
 
-    Configuration config = Configuration();
+    Configuration config;
     config.load(config_storage->getGroup("gatb"));
     Repartitor repartitor(repart_storage->getGroup("repartition"));
 
-    // typedef typename ::Kmer<span>::ModelCanonical ModelCanonical;
-    // typedef typename ::Kmer<span>::template ModelMinimizer <ModelCanonical> Model;
+    std::vector<kw_t<8192>> writers;
+    for (auto& part_id : m_partitions) {
+       auto path = KmDir::get().get_unsorted_count_part_path(m_sample_id, part_id, m_lz4, KM_FILE::KFF);
+       std::make_shared<KmerWriter<8192>>(path, config._kmerSize, requiredC<MAX_C>::value/8, m_iid, part_id, m_lz4);
+    }
 
-    // uint32_t* freq_order = nullptr;
-    // Model model(config._kmerSize, config._minim_size,
-    //             typename ::Kmer<span>::ComparatorMinimizerFrequencyOrLex(), freq_order);
+    using ModelCanonical = typename ::Kmer<span>::ModelCanonical;
+    using ModelMinimizer =  typename ::Kmer<span>::template ModelMinimizer <ModelCanonical>;
+    using Type = typename ::Kmer<span>::Type;
+
+    ModelMinimizer model(config._kmerSize, config._minim_size, typename ::Kmer<span>::ComparatorMinimizerFrequencyOrLex(), nullptr);
+    const ModelCanonical& modelMinimizer = model.getMmersModel();
 
     Iterator<Sequence>* itSeq = bank->iterator(); LOCAL(itSeq);
     BankStats bank_stats;
-    PartiInfo<5> pinfo (config._nb_partitions, config._minim_size);
 
-    for (itSeq->first(); !itSeq->isDone(); itSeq->next()) {
+    for (itSeq->first(); !itSeq->isDone(); itSeq->next())
+    {
       auto& unitig = itSeq->item();
 
       std::smatch match;
@@ -324,99 +330,29 @@ public:
       }
 
       auto abundance = std::round(std::stod(match[1].str()));
+      if (abundance < m_ab_min) {
+        continue;
+      }
+
       auto &seq = unitig.getData();
+      model.iterate(unitig.getData(), [&](const typename ModelMinimizer::Kmer& kmer, size_t idx) {
+        auto mmer = kmer.minimizer().value().getVal();
+        size_t part_id = repartitor(mmer);
+
+        auto count = abundance >= m_max_c ? m_max_c : static_cast<km_count_type>(abundance);
+        writers[part_id]->template write_raw<MAX_C>(kmer.value().get_data(), count);
+      });
     }
-
-    // spdlog::debug("[exec] - KffCountTask - S={}, P={}", KmDir::get().m_fof.get_id(m_sample_id), m_part_id);
-
-    // MemAllocator pool(1);
-    // pool.reserve(get_required_memory<span>(m_pinfo->getNbKmer(m_part_id)));
-    // kff_w_t<DMAX_C> writer = std::make_shared<KffWriter<MAX_C>>(m_path, m_kmer_size);
-
-    // KffCountProcessor<span, DMAX_C>* processor(new KffCountProcessor<span, MAX_C>(m_kmer_size,
-    //                                                                               m_ab_min,
-    //                                                                               writer,
-    //                                                                               m_hist));
-
-    // KmerPartCounter<Storage, span> partition_counter(processor, m_pinfo.get(), m_part_id, m_kmer_size,
-    //                                                  pool, m_superk_storage.get());
-
-    // partition_counter.execute();
-    // pool.free_all();
-    // delete processor;
-
-    // spdlog::debug("[done] - KffCountTask - S={}, P={}", KmDir::get().m_fof.get_id(m_sample_id), m_part_id);
-
-
-
-    // size_t p = m_repartition(superKmer.minimizer);
-    // superKmer.save(p, m_superk_files);
-
-    // klibpp::KSeq unitig;
-    // klibpp::SeqStreamIn utg_ssi(utg_file.c_str());
-
-    // std::vector<kw_t<8192>> out_streams;
-    // for(auto pid=0; pid < nb_partitions; pid++) {
-    //   std::string path = fmt::format("{}/partition_{:d}/{}.kmer", opts.ucounts_dir.string(), pid, sid);
-    //   out_streams.push_back(std::make_shared<km::KmerWriter<8192>>(path, ksize, km::requiredC<DMAX_C>::value/8, iid, pid, true));
-    // }
-
-    // for(uint64_t utg_id=0; utg_ssi >> unitig; utg_id++) {
-
-    //   auto utg_abundance = std::round(std::stod(match[1].str()));
-    //   auto &seq = unitig.seq;
-    //   km::Kmer<MAX_K> kmer(ksize);
-    //   for(std::size_t i=0; i < seq.length()-ksize+1; i++) {
-    //     if(i==0) {
-    //       kmer.set_polynom(seq.c_str(),ksize);
-    //     } else {
-    //       kmer <<= 2;
-    //       kmer |= ((seq[i+ksize-1] >> 1) & 3);
-    //     }
-    //     uint32_t pid = repart.get_partition(kmer.minimizer(opts.minim_size).value());
-    //     out_streams[pid]->template write<MAX_K, DMAX_C>(kmer,utg_abundance);
-    //   }
-    // }
-
-    // IteratorListener* progress(new ProgressSynchro(
-    //                            new IteratorListener(),
-    //                            System::thread().newSynchronizer()));
-    // LOCAL(progress);
-    // progress->init();
-    // {
-    //   auto fill_partitions = KmFillPartitions<span>(model,
-    //                                                     1,
-    //                                                     0,
-    //                                                     config._nb_partitions,
-    //                                                     config._nb_cached_items_per_core_per_part,
-    //                                                     progress,
-    //                                                     bank_stats,
-    //                                                     nullptr,
-    //                                                     repartitor,
-    //                                                     pinfo,
-    //                                                     superk_storage);
-
-    //   for (itSeq->first(); !itSeq->isDone(); itSeq->next())
-    //   {
-    //     fill_partitions(itSeq->item());
-    //   }
-    //   itSeq->finalize();
-    // }
-
-    // progress->finish();
-    // superk_storage->SaveInfoFile(KmDir::get().get_superk_path(m_sample_id));
-    // delete superk_storage;
-    // pinfo.saveInfoFile(KmDir::get().get_superk_path(m_sample_id));
-    // dump_pinfo(&pinfo, config._nb_partitions, KmDir::get().get_pinfos_path(m_sample_id));
-    // spdlog::debug("[done] - SuperKTask - S={}", m_sample_id);
   }
 
 private:
   std::string m_sample_id;
   uint32_t m_iid;
   std::string m_utg_file;
+  uint32_t m_ab_min;
   bool m_lz4;
   std::vector<uint32_t>& m_partitions;
+  uint32_t m_max_c {std::numeric_limits<km_count_type>::max()};
 };
 
 

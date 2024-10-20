@@ -412,12 +412,10 @@ public:
       auto& sid = std::get<0>(sample);
       auto iid = KmDir::get().m_fof.get_i(sid);
       auto utg_file = KmDir::get().m_fof.get_files(sid);
+      auto a_min = std::get<2>(sample) == 0 ? m_opt->c_ab_min : std::get<2>(sample);
       
-      task_t task = std::make_shared<LoganRepartTask<MAX_K>>(sid, iid, utg_file, m_opt->lz4, m_opt->restrict_to_list);
+      task_t task = std::make_shared<LoganRepartTask<MAX_K,MAX_C>>(sid, iid, utg_file, a_min, m_opt->lz4, m_opt->restrict_to_list);
       pool.add_task(task);
-
-      // auto a_min = std::get<2>(sample) == 0 ? m_opt->c_ab_min : std::get<2>(sample);
-      // fmt::print(stderr, "[info] processing unitig sample {}: {}\n", sid, utg_file);
     }
 
     pool.join_all();
