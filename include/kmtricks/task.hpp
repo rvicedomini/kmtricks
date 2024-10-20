@@ -357,6 +357,87 @@ private:
 
 
 template<size_t span, size_t MAX_C, typename Storage>
+class LoganCountTask : public ITask
+{
+  using storage_t = std::shared_ptr<Storage>;
+public:
+  LoganCountTask(const std::string& path,
+            Configuration& config,
+            storage_t superk_storage,
+            parti_info_t pinfo,
+            uint32_t part_id, uint32_t sample_id,
+            uint32_t kmer_size, uint32_t abundance_min, bool lz4,
+            hist_t hist = nullptr, bool clear = false)
+    : ITask(3, clear),
+      m_path(path),
+      m_config(config),
+      m_superk_storage(superk_storage),
+      m_pinfo(pinfo),
+      m_part_id(part_id),
+      m_sample_id(sample_id),
+      m_kmer_size(kmer_size),
+      m_ab_min(abundance_min),
+      m_lz4(lz4),
+      m_hist(hist)
+   {
+   }
+
+  void preprocess() {}
+  void postprocess()
+  {
+    if (this->m_clear)
+    {
+      m_superk_storage->closeFile(m_part_id);
+      //m_superk_storage->eraseFile(m_part_id);
+      Eraser::get().erase(m_superk_storage->getFileName(m_part_id));
+    }
+    this->m_finish = true;
+    this->exec_callback();
+  }
+
+  void exec()
+  {
+    spdlog::debug("[exec] - CountTask - S={}, P={}", KmDir::get().m_fof.get_id(m_sample_id), m_part_id);
+
+    MemAllocator pool(1);
+    pool.reserve(get_required_memory<span>(m_pinfo->getNbKmer(m_part_id)));
+    kw_t<8192> writer = std::make_shared<KmerWriter<8192>>(m_path,
+                                                           m_kmer_size,
+                                                           requiredC<MAX_C>::value/8,
+                                                           m_sample_id,
+                                                           m_part_id,
+                                                           m_lz4);
+
+    KmerCountProcessor<span, MAX_C>* processor(new KmerCountProcessor<span, MAX_C>(m_kmer_size,
+                                                                                    m_ab_min,
+                                                                                    writer,
+                                                                                    m_hist));
+
+    KmerPartCounter<Storage, span> partition_counter(processor, m_pinfo.get(), m_part_id,
+                                                     m_kmer_size, pool, m_superk_storage.get());
+
+    partition_counter.execute();
+    pool.free_all();
+    delete processor;
+    spdlog::debug("[done] - CountTask - S={}, P={}", KmDir::get().m_fof.get_id(m_sample_id), m_part_id);
+  }
+private:
+  std::string m_path;
+  Configuration& m_config;
+  //Storage& m_superk_storage;
+  //PartiInfo<5>& m_pinfo;
+  storage_t m_superk_storage;
+  parti_info_t m_pinfo;
+  uint32_t m_part_id;
+  uint32_t m_sample_id;
+  uint32_t m_kmer_size;
+  uint32_t m_ab_min;
+  bool m_lz4;
+  hist_t m_hist;
+};
+
+
+template<size_t span, size_t MAX_C, typename Storage>
 class CountTask : public ITask
 {
   using storage_t = std::shared_ptr<Storage>;
