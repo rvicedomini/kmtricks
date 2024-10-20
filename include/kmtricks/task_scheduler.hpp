@@ -415,6 +415,11 @@ public:
       auto a_min = std::get<2>(sample) == 0 ? m_opt->c_ab_min : std::get<2>(sample);
       
       task_t task = std::make_shared<LoganRepartTask<MAX_K,MAX_C>>(sid, iid, utg_file, a_min, m_opt->lz4, m_opt->restrict_to_list);
+      task->set_callback([this, sample, &pool](){
+
+      });
+
+      task->set_level(5);
       pool.add_task(task);
     }
 
