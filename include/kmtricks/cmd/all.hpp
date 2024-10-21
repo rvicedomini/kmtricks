@@ -122,6 +122,18 @@ struct all_options : km_options
 
   void sanity_check()
   {
+    if ((logan) && (kmer_size != 31))
+    {
+      throw PipelineError("--logan available only for --kmer-size equal to 31");
+    }
+    if ((logan) && (count_format != COUNT_FORMAT::KMER || mode != MODE::COUNT || format != FORMAT::BIN))
+    {
+      throw PipelineError("--logan available only with matrix mode \"kmer:count:bin\"");
+    }
+    if ((logan) && (kff))
+    {
+      throw PipelineError("--logan does not support --kff-output");
+    }
     if ((kff) && (until != COMMAND::COUNT))
     {
       throw PipelineError("--kff-output/--kff-sk-output available only with --until count");

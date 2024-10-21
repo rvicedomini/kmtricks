@@ -98,7 +98,7 @@ public:
     return fmt::format(m_part_template, m_counts_storage, part_id, id, ext);
   }
 
-  std::string get_unsorted_count_part_path(std::string id, uint32_t part_id, bool compressed, KM_FILE km_file)
+  std::string get_unsorted_count_part_path(std::string& id, uint32_t part_id, bool compressed, KM_FILE km_file)
   {
     std::string ext;
     if (KM_FILE::HASH == km_file)

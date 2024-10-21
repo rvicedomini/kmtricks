@@ -302,10 +302,10 @@ public:
     config.load(config_storage->getGroup("gatb"));
     Repartitor repartitor(repart_storage->getGroup("repartition"));
 
-    std::vector<kw_t<8192>> writers;
+    std::vector<kw_t<8192>> writers(config._nb_partitions, nullptr);
     for (auto& part_id : m_partitions) {
-       auto path = KmDir::get().get_unsorted_count_part_path(m_sample_id, part_id, m_lz4, KM_FILE::KFF);
-       std::make_shared<KmerWriter<8192>>(path, config._kmerSize, requiredC<MAX_C>::value/8, m_iid, part_id, m_lz4);
+       auto path = KmDir::get().get_unsorted_count_part_path(m_sample_id, part_id, m_lz4, KM_FILE::KMER);
+       writers[part_id] = std::make_shared<KmerWriter<8192>>(path, config._kmerSize, requiredC<MAX_C>::value/8, m_iid, part_id, m_lz4);
     }
 
     using ModelCanonical = typename ::Kmer<span>::ModelCanonical;
@@ -356,40 +356,32 @@ private:
 };
 
 
-template<size_t span, size_t MAX_C, typename Storage>
+template<size_t MAX_K, size_t MAX_C>
 class LoganCountTask : public ITask
 {
-  using storage_t = std::shared_ptr<Storage>;
+  using count_type = typename km::selectC<DMAX_C>::type;
+
 public:
   LoganCountTask(const std::string& path,
-            Configuration& config,
-            storage_t superk_storage,
-            parti_info_t pinfo,
-            uint32_t part_id, uint32_t sample_id,
+            const std::string& sample_id,
+            uint32_t part_id, uint32_t iid,
             uint32_t kmer_size, uint32_t abundance_min, bool lz4,
-            hist_t hist = nullptr, bool clear = false)
+            bool clear = false)
     : ITask(3, clear),
       m_path(path),
-      m_config(config),
-      m_superk_storage(superk_storage),
-      m_pinfo(pinfo),
-      m_part_id(part_id),
       m_sample_id(sample_id),
+      m_part_id(part_id),
+      m_iid(iid),
       m_kmer_size(kmer_size),
       m_ab_min(abundance_min),
-      m_lz4(lz4),
-      m_hist(hist)
-   {
-   }
+      m_lz4(lz4)
+   { }
 
   void preprocess() {}
   void postprocess()
   {
-    if (this->m_clear)
-    {
-      m_superk_storage->closeFile(m_part_id);
-      //m_superk_storage->eraseFile(m_part_id);
-      Eraser::get().erase(m_superk_storage->getFileName(m_part_id));
+    if (m_clear) {
+      Eraser::get().erase(KmDir::get().get_unsorted_count_part_path(m_sample_id, m_part_id, m_lz4, KM_FILE::KMER));
     }
     this->m_finish = true;
     this->exec_callback();
@@ -397,43 +389,39 @@ public:
 
   void exec()
   {
-    spdlog::debug("[exec] - CountTask - S={}, P={}", KmDir::get().m_fof.get_id(m_sample_id), m_part_id);
+    spdlog::debug("[exec] - LoganCountTask - S={}, P={}", m_sample_id, m_part_id);
 
-    MemAllocator pool(1);
-    pool.reserve(get_required_memory<span>(m_pinfo->getNbKmer(m_part_id)));
-    kw_t<8192> writer = std::make_shared<KmerWriter<8192>>(m_path,
-                                                           m_kmer_size,
-                                                           requiredC<MAX_C>::value/8,
-                                                           m_sample_id,
-                                                           m_part_id,
-                                                           m_lz4);
+    KmerReader<8192> reader(KmDir::get().get_unsorted_count_part_path(m_sample_id, m_part_id, m_lz4, KM_FILE::KMER));
+    km::Kmer<MAX_K> kmer; kmer.set_k(m_kmer_size);
+    count_type count;
 
-    KmerCountProcessor<span, MAX_C>* processor(new KmerCountProcessor<span, MAX_C>(m_kmer_size,
-                                                                                    m_ab_min,
-                                                                                    writer,
-                                                                                    m_hist));
+    // load counted k-mers
+    std::vector<std::pair<km::Kmer<MAX_K>,count_type>> ckmers;
+    while (reader.read<MAX_K,MAX_C>(kmer, count)) {
+      ckmers.emplace_back(kmer,count);
+    }
 
-    KmerPartCounter<Storage, span> partition_counter(processor, m_pinfo.get(), m_part_id,
-                                                     m_kmer_size, pool, m_superk_storage.get());
+    // sort k-mers
+    std::sort(ckmers.begin(),ckmers.end());
 
-    partition_counter.execute();
-    pool.free_all();
-    delete processor;
-    spdlog::debug("[done] - CountTask - S={}, P={}", KmDir::get().m_fof.get_id(m_sample_id), m_part_id);
+    // write sorted k-mers
+
+    km::KmerWriter<8192> writer(m_path, m_kmer_size, km::requiredC<MAX_C>::value/8, m_iid, m_part_id, m_lz4);
+    for(auto &[kmer,count] : ckmers) {
+      writer.write<MAX_K,MAX_C>(kmer,count);
+    }
+
+    spdlog::debug("[done] - LoganCountTask - S={}, P={}", m_sample_id, m_part_id);
   }
+
 private:
   std::string m_path;
-  Configuration& m_config;
-  //Storage& m_superk_storage;
-  //PartiInfo<5>& m_pinfo;
-  storage_t m_superk_storage;
-  parti_info_t m_pinfo;
+  std::string m_sample_id;
   uint32_t m_part_id;
-  uint32_t m_sample_id;
+  uint32_t m_iid;
   uint32_t m_kmer_size;
   uint32_t m_ab_min;
   bool m_lz4;
-  hist_t m_hist;
 };
 
 
